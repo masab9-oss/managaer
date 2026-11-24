@@ -74,6 +74,37 @@ def gh(path, body=None, method=None, raw=False):
     return json.loads(out) if out else {}
 
 
+def err(e):
+    return f"error {e.code}" if isinstance(e, urllib.error.HTTPError) else type(e).__name__
+
+
+def find_repos():
+    """Find the real repository and workflow names, so small spelling differences
+    (islamiwaqiat / Islami-Waqiat, post.yml / Post.yml) don't break the bot."""
+    global NEWS_REPO, VIDEO_REPO, NEWS_WF, VIDEO_WF
+    try:
+        req = urllib.request.Request("https://api.github.com/user/repos?per_page=100", headers={
+            "Authorization": f"Bearer {GH}", "Accept": "application/vnd.github+json", "User-Agent": "manager-bot"})
+        with urllib.request.urlopen(req, timeout=40, context=CTX) as r:
+            names = [x["name"] for x in json.loads(r.read())]
+    except Exception:  # noqa: BLE001
+        return
+    norm = {re.sub(r"[^a-z0-9]", "", n.lower()): n for n in names}
+    for key, n in norm.items():
+        if "newspulse" in key:
+            NEWS_REPO = n
+        elif "islami" in key or "waqiat" in key or "waqyat" in key:
+            VIDEO_REPO = n
+    for repo, want, var in ((NEWS_REPO, "post", "NEWS_WF"), (VIDEO_REPO, "make", "VIDEO_WF")):
+        try:
+            wfs = gh(f"{repo}/actions/workflows").get("workflows", [])
+            match = [w for w in wfs if want in w.get("path", "").lower()] or wfs
+            if match:
+                globals()[var] = match[0]["path"].split("/")[-1]
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def pk_time(iso):
     """GitHub/ISO time -> '24 Nov, 07:15 PM' in Pakistan time."""
     if not iso:
@@ -126,7 +157,7 @@ def status():
         if titles:
             lines.append(f"Aakhri khabar: {titles[-1][:120]}")
     except Exception as e:  # noqa: BLE001
-        lines.append(f"\n📰 News Pulse: state nahi parh saka ({type(e).__name__})")
+        lines.append(f"\n📰 News Pulse: state nahi parh saka ({err(e)})")
     try:
         wf = gh(f"{NEWS_REPO}/actions/workflows/{NEWS_WF}")
         lines.append("Auto-posting: " + ("✅ chalu" if wf.get("state") == "active" else "⏸ band"))
@@ -136,7 +167,7 @@ def status():
             res = {"success": "✅", "failure": "❌", "cancelled": "⚪"}.get(r.get("conclusion"), "⏳")
             lines.append(f"Aakhri run: {res} {pk_time(r.get('created_at'))}")
     except Exception as e:  # noqa: BLE001
-        lines.append(f"(GitHub runs nahi dekh saka: {type(e).__name__})")
+        lines.append(f"(GitHub runs nahi dekh saka: {err(e)})")
     try:
         runs = gh(f"{VIDEO_REPO}/actions/workflows/{VIDEO_WF}/runs?per_page=10").get("workflow_runs", [])
         ok = [r for r in runs if r.get("conclusion") == "success"]
@@ -144,7 +175,7 @@ def status():
         if runs and runs[0].get("conclusion") == "failure":
             lines.append("⚠️ Sab se aakhri video run fail hua tha.")
     except Exception as e:  # noqa: BLE001
-        lines.append(f"\n🎬 Islami Waqiat: nahi dekh saka ({type(e).__name__})")
+        lines.append(f"\n🎬 Islami Waqiat ({VIDEO_REPO}/{VIDEO_WF}) nahi dekh saka: {err(e)}")
     say("\n".join(lines))
 
 
@@ -245,6 +276,9 @@ def main():
             say("GH_TOKEN secret missing hai, is liye main GitHub nahi chala sakta.")
             continue
         try:
+            if NEWS_WF == "post.yml" and VIDEO_WF == "make.yml" and not getattr(main, "found", False):
+                find_repos()
+                main.found = True
             handle(text)
         except urllib.error.HTTPError as e:
             say(f"⚠️ GitHub ne mana kar diya (error {e.code}). Shayad GH_TOKEN ki ijazat kam hai.")
