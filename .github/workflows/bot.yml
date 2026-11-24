@@ -1,0 +1,29 @@
+name: Manager bot
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # check Telegram every 5 minutes (GitHub sometimes runs it later)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manager-bot
+  cancel-in-progress: false
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          OWNER: ${{ github.repository_owner }}
+        run: python3 bot.py
+
