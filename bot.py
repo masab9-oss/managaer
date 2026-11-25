@@ -204,12 +204,16 @@ def ask_gemini(text):
               "You cannot change code or settings yourself; for actions tell him these commands: "
               "'post karo', '<topic> par post karo', 'trending', 'video banao', 'status', 'band karo', 'chalu karo'. "
               "For bigger changes tell him to ask Claude in the Claude app.\n\nUser: " + text)
-    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
+    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}],
+                       "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.5}}).encode()
     for model in ("gemini-3.8-flash", "gemini-flash-latest", "gemini-flash-lite-latest"):
         try:
             r = call(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                      body, {"Content-Type": "application/json", "x-goog-api-key": GEMINI}, timeout=40)
-            return r["candidates"][0]["content"]["parts"][0]["text"].strip()
+            parts = r["candidates"][0]["content"]["parts"]
+            text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+            if text:
+                return text
         except Exception:  # noqa: BLE001
             continue
     return None
